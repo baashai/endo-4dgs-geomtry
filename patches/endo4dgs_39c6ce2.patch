@@ -1,0 +1,250 @@
+diff --git a/arguments/__init__.py b/arguments/__init__.py
+index 7cf80ca..f1e0a80 100644
+--- a/arguments/__init__.py
++++ b/arguments/__init__.py
+@@ -60,6 +60,7 @@ class ModelParams(ParamGroup):
+         self.llffhold=8
+         self.camera_extent=0
+         self.use_pretrain=True
++        self.depth_prior="dam" # depth maps are read from <source>/depth_<depth_prior>/ (dam: Depth-Anything, moge: MoGe-2)
+         super().__init__(parser, "Loading Parameters", sentinel)
+ 
+     def extract(self, args):
+@@ -76,6 +77,7 @@ class PipelineParams(ParamGroup):
+         self.use_smooth=False
+         self.use_normal=False
+         self.use_confidence=False
++        self.prior_normal=False # supervise camera-frame rendered normals with normal_moge/ (replaces the pseudo-normal loss)
+         super().__init__(parser, "Pipeline Parameters")
+         
+ class ModelHiddenParams(ParamGroup):
+@@ -94,6 +96,7 @@ class ModelHiddenParams(ParamGroup):
+         self.depth_weight = 0.01
+         self.grad_weight=0.001
+         self.normal_weight = 0.001
++        self.prior_normal_weight = 0.01
+         self.un_img_weight = 0.1
+         self.un_dep_weight = 0.1
+         self.l1_time_planes = 0.0001
+diff --git a/gaussian_renderer/__init__.py b/gaussian_renderer/__init__.py
+index b9ba70e..14d09e0 100644
+--- a/gaussian_renderer/__init__.py
++++ b/gaussian_renderer/__init__.py
+@@ -115,18 +115,36 @@ def render(viewpoint_camera, gs, pipe, bg_color: torch.Tensor, scaling_modifier
+     
+     if mode =='train':
+         normal = get_smallest_axis(rotations_final, scales_final)
+-        normal_sh = RGB2SH((normal+1)/2)
+-        
+-        normal_shs = shs_final.clone()
+-        normal_shs[:, 0, :3] = normal_sh
+-        
+-        normal_map, rad_norm, dep_norm, weight_norm = rasterizer(
+-            means3D = means3D_final,
+-            means2D = means2D,
+-            shs = normal_shs,
+-            opacities = opacity_final,
+-            scales = scales_final,
+-            rotations = rotations_final)
++        if getattr(pipe, "prior_normal", False):
++            # normals in the camera frame (x right, y down, z forward), flipped to face the camera,
++            # rendered as raw vectors on a black background (no SH leakage, no background bias);
++            # only the direction of the composited vector is meaningful
++            w2c = viewpoint_camera.world_view_transform.cuda()
++            normal_cam = normal @ w2c[:3, :3]
++            means_cam = means3D_final @ w2c[:3, :3] + w2c[3, :3]
++            facing = ((normal_cam * means_cam).sum(-1, keepdim=True) > 0).float()
++            normal_cam = normal_cam * (1 - 2 * facing)
++            normal_rasterizer = GaussianRasterizer(raster_settings=raster_settings._replace(bg=torch.zeros_like(bg_color)))
++            normal_map, rad_norm, dep_norm, weight_norm = normal_rasterizer(
++                means3D = means3D_final,
++                means2D = means2D,
++                colors_precomp = normal_cam,
++                opacities = opacity_final,
++                scales = scales_final,
++                rotations = rotations_final)
++        else:
++            normal_sh = RGB2SH((normal+1)/2)
++            
++            normal_shs = shs_final.clone()
++            normal_shs[:, 0, :3] = normal_sh
++            
++            normal_map, rad_norm, dep_norm, weight_norm = rasterizer(
++                means3D = means3D_final,
++                means2D = means2D,
++                shs = normal_shs,
++                opacities = opacity_final,
++                scales = scales_final,
++                rotations = rotations_final)
+         
+         re_dict = {"render": rendered_image,
+                 "viewspace_points": screenspace_points,
+diff --git a/scene/__init__.py b/scene/__init__.py
+index 853e652..dd57f44 100644
+--- a/scene/__init__.py
++++ b/scene/__init__.py
+@@ -48,7 +48,8 @@ class Scene:
+         elif os.path.exists(os.path.join(args.source_path,"dataset.json")):
+             scene_info = sceneLoadTypeCallbacks["nerfies"](args.source_path, False, args.eval, args.use_pretrain)
+         elif os.path.exists(os.path.join(args.source_path, "poses_bounds.npy")) and 'endo' in args.source_path:
+-            scene_info = sceneLoadTypeCallbacks["endonerf"](args.source_path, args.white_background, args.eval, args.use_pretrain)
++            scene_info = sceneLoadTypeCallbacks["endonerf"](args.source_path, args.white_background, args.eval, args.use_pretrain,
++                                                            depth_prior=getattr(args, "depth_prior", "dam"))
+             print("Found poses_bounds.py and extra marks with EndoNeRf")
+         elif os.path.exists(os.path.join(args.source_path, "point_cloud.obj")) or os.path.exists(os.path.join(args.source_path, "left_point_cloud.obj")):
+             scene_info = sceneLoadTypeCallbacks["scared"](args.source_path, args.white_background, args.eval, args.use_pretrain)
+diff --git a/scene/dataset_readers.py b/scene/dataset_readers.py
+index 4f874d8..ccef9dd 100644
+--- a/scene/dataset_readers.py
++++ b/scene/dataset_readers.py
+@@ -443,7 +443,7 @@ def readdynerfInfo(datadir,use_bg_points,eval):
+                            )
+     return scene_info
+ 
+-def readEndoNeRFInfo(datadir, use_bg_points, eval, use_pretrain=True):
++def readEndoNeRFInfo(datadir, use_bg_points, eval, use_pretrain=True, depth_prior="dam"):
+     # load camera infos
+     from scene.endo_loader import EndoNeRF_Dataset
+     if 'stereomis' in datadir:
+@@ -454,7 +454,8 @@ def readEndoNeRFInfo(datadir, use_bg_points, eval, use_pretrain=True):
+     endo_dataset = EndoNeRF_Dataset(
+         datadir=datadir,
+         downsample=1.0,
+-        stereomis=sm
++        stereomis=sm,
++        depth_prior=depth_prior
+     )
+     train_cam_infos = endo_dataset.format_infos(split="train")
+     test_cam_infos = endo_dataset.format_infos(split="test")
+diff --git a/scene/endo_loader.py b/scene/endo_loader.py
+index 0f97f2d..047540c 100644
+--- a/scene/endo_loader.py
++++ b/scene/endo_loader.py
+@@ -158,7 +158,8 @@ class EndoNeRF_Dataset(object):
+         datadir,
+         downsample=1.0,
+         test_every=8,
+-        stereomis=False
++        stereomis=False,
++        depth_prior="dam"
+     ):
+         self.img_wh = (
+             int(640 / downsample),
+@@ -170,6 +171,7 @@ class EndoNeRF_Dataset(object):
+         self.transform = T.ToTensor()
+         self.white_bg = False
+         self.stereomis = stereomis
++        self.depth_dir = f"depth_{depth_prior}"
+ 
+         self.load_meta()
+         print(f"meta data loaded, total image:{len(self.image_paths)}")
+@@ -226,10 +228,7 @@ class EndoNeRF_Dataset(object):
+         agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")) \
+             +glob.glob(os.path.join(self.root_dir, filetype, "*.npy")))
+         self.image_paths = agg_fn("images")
+-        if self.stereomis:
+-            self.depth_paths = agg_fn('dep_png')
+-        else:
+-            self.depth_paths = agg_fn("depth_dam")
++        self.depth_paths = agg_fn(self.depth_dir)
+         self.mask_paths = agg_fn("masks")
+ 
+ 
+@@ -251,7 +250,7 @@ class EndoNeRF_Dataset(object):
+             color = (np.array(Image.open(self.image_paths[idx]))/255.0).astype(np.float32)
+             # depth
+             # depth_es = 1 / depth_es * 1000
+-            depth_es = np.load(self.image_paths[idx].replace('images', 'depth_dam').replace('png', 'npy'))
++            depth_es = np.load(self.image_paths[idx].replace('images', self.depth_dir).replace('png', 'npy'))
+             # mask
+             if len(self.mask_paths) == 0:
+                 if self.stereomis:
+@@ -294,7 +293,8 @@ class EndoNeRF_Dataset(object):
+         color = self.init_img.transpose((2,0,1))
+         _, h, w = color.shape
+         depth = self.init_depth
+-        mask = self.init_mask[None].astype(np.uint8)
++        # pixels without a valid prior depth (0, e.g. outside MoGe-2's mask) are not back-projected
++        mask = np.logical_and(self.init_mask, depth.reshape(self.init_mask.shape) > 0)[None].astype(np.uint8)
+         
+         intrinsics = [self.focal[0], self.focal[1], w/2, h/2]
+         R, T = self.image_poses[0]
+diff --git a/train.py b/train.py
+index e0055ef..d3936b7 100644
+--- a/train.py
++++ b/train.py
+@@ -260,7 +260,15 @@ def scene_reconstruction(mp, opt, hyper, pipe, testing_iterations, saving_iterat
+             sm_loss = (grad_loss(depth_tensor, gt_depth_tensor, mask=mask_tensor)) * grad_weight
+             loss += sm_loss
+             
+-        if use_normal:
++        if pipe.prior_normal:
++            # cosine loss between rendered camera-frame normals and the MoGe-2 normals
++            prior_normal = torch.stack([load_prior_normal(scene, cam) for cam in viewpoint_cams], 0)
++            rendered = F.normalize(gs_normal, dim=1)
++            valid = mask_tensor.unsqueeze(1) * (prior_normal.norm(dim=1, keepdim=True) > 0.5)
++            cos = (rendered * prior_normal).sum(1, keepdim=True)
++            normal_loss = ((1 - cos) * valid).sum() / valid.sum().clamp(min=1) * hyper.prior_normal_weight
++            loss += normal_loss
++        elif use_normal:
+             normal_weight = hyper.normal_weight
+             pseudo_normal=get_pseudo_normal(gt_depth_tensor, mask_tensor.unsqueeze(0))
+             pseudo_normal = F.interpolate(pseudo_normal, gs_normal.shape[2:4])
+@@ -402,6 +410,16 @@ def scene_reconstruction(mp, opt, hyper, pipe, testing_iterations, saving_iterat
+                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
+                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
+ 
++_prior_normal_cache = {}
++def load_prior_normal(scene, cam):
++    """MoGe-2 normal of a training camera, (3, H, W) on the GPU, from <source>/normal_moge/."""
++    if cam.uid not in _prior_normal_cache:
++        path = scene.getTrainCameras().dataset[cam.uid].image_path
++        path = os.path.join(os.path.dirname(os.path.dirname(path)), "normal_moge",
++                            os.path.splitext(os.path.basename(path))[0] + ".npy")
++        _prior_normal_cache[cam.uid] = torch.from_numpy(np.load(path).astype(np.float32)).permute(2, 0, 1).cuda()
++    return _prior_normal_cache[cam.uid]
++
+ def training(model_param, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname):
+     # first_iter = 0
+     tb_writer = prepare_output_and_logger(expname)
+@@ -513,6 +531,7 @@ if __name__ == "__main__":
+     parser.add_argument("--test_iterations", nargs="+", type=int, default=[500*i for i in range(100)])
+     parser.add_argument("--save_iterations", nargs="+", type=int, default=[1000, 3000, 4000, 5000, 6000, 7_000, 9000, 10000, 12000, 14000, 20000, 30_000, 45000, 60000])
+     parser.add_argument("--quiet", action="store_true")
++    parser.add_argument("--seed", type=int, default=0)
+     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+     parser.add_argument("--start_checkpoint", type=str, default = None)
+     parser.add_argument("--expname", type=str, default = "")
+@@ -529,7 +548,7 @@ if __name__ == "__main__":
+     print("Optimizing " + args.model_path)
+ 
+     # Initialize system state (RNG)
+-    safe_state(args.quiet)
++    safe_state(args.quiet, args.seed)
+     # Start GUI server, configure and run training
+     network_gui.init(args.ip, args.port)
+     
+diff --git a/utils/general_utils.py b/utils/general_utils.py
+index 6b15169..ff33981 100644
+--- a/utils/general_utils.py
++++ b/utils/general_utils.py
+@@ -115,7 +115,7 @@ def build_scaling_rotation(s, r):
+     L = R @ L
+     return L
+ 
+-def safe_state(silent):
++def safe_state(silent, seed=0):
+     old_f = sys.stdout
+     class F:
+         def __init__(self, silent):
+@@ -133,7 +133,7 @@ def safe_state(silent):
+ 
+     sys.stdout = F(silent)
+ 
+-    random.seed(0)
+-    np.random.seed(0)
+-    torch.manual_seed(0)
++    random.seed(seed)
++    np.random.seed(seed)
++    torch.manual_seed(seed)
+     torch.cuda.set_device(torch.device("cuda:0"))

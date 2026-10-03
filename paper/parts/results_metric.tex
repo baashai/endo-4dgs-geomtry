@@ -1,0 +1,47 @@
+
+\subsection{Prior accuracy, metric depth and scale drift}
+\label{sec:metric}
+\begin{table}[t]
+\caption{Monocular priors alone on the test frames, against SGBM stereo. Raw scale: mean per-frame median ratio of stereo to prior depth (CV: its coefficient of variation over frames). Aligned AbsRel and median relative error after per-frame median alignment; valid: fraction of pixels with stereo and prior depth.}
+\label{tab:priors}
+\centering\scriptsize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}llccccc@{}}
+\toprule
+Seq. & Prior & raw scale & CV & aligned AbsRel & median rel. & valid \\
+\midrule
+P1 & Depth-Anything ViT-B & 3.450 & 3.4\,\% & 0.237 & 0.166 & 0.51 \\
+P1 & MoGe-2 ViT-L & 0.168 & 12.8\,\% & 0.148 & 0.099 & 0.51 \\
+P2\_5 & Depth-Anything ViT-B & 2.946 & 1.3\,\% & 0.059 & 0.044 & 0.60 \\
+P2\_5 & MoGe-2 ViT-L & 0.056 & 6.4\,\% & 0.036 & 0.028 & 0.60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{Depth error of the trained models against SGBM stereo under three alignments (mean of 3 seeds): per-frame median alignment (aligned), one factor fitted on the training views (fixed), and none (metric, raw rendered depth in the pose units). Scale: mean per-test-frame alignment factor and its CV over frames.}
+\label{tab:metric}
+\centering\scriptsize
+\setlength{\tabcolsep}{2.1pt}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+Setup & aligned & fixed & metric & train scale & test scale & CV \\
+\midrule
+\multicolumn{7}{@{}l}{\emph{P1}} \\
+Original & 0.234 & 0.236 & 0.744 & 4.15 & 4.19 & 5.4\,\% \\
++ FoV fix (DA) & 0.235 & 0.236 & 0.737 & 4.12 & 4.14 & 4.4\,\% \\
++ FoV, MoGe-2 + depth loss & 0.155 & 0.157 & 0.470 & 1.87 & 1.91 & 5.3\,\% \\
+\rowcolor{ours!12} Ours & 0.148 & 0.151 & 0.462 & 1.83 & 1.87 & 5.1\,\% \\
+\midrule
+\multicolumn{7}{@{}l}{\emph{P2\_5}} \\
+Original & 0.063 & 0.063 & 0.662 & 3.03 & 3.04 & 0.7\,\% \\
++ FoV fix (DA) & 0.064 & 0.064 & 0.662 & 3.04 & 3.04 & 0.6\,\% \\
++ FoV, MoGe-2 init, unscaled & 0.046 & 0.046 & 15.91 & 0.060 & 0.060 & 0.6\,\% \\
++ FoV, MoGe-2 init, stereo-scaled & 0.046 & 0.046 & 0.056 & 1.04 & 1.04 & 0.8\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two questions underlie the main metric: how much does per-frame alignment hide, and how much of the reconstructed geometry comes from the prior? Table~\ref{tab:metric} shows that one scale factor fitted on the training views gives almost the same error as per-frame alignment (at most 0.003 higher), and that the per-frame factors vary by only 0.4--6.2\,\% over the test frames in individual runs, so per-frame alignment hides little temporal scale drift in these clips. It does hide the absolute scale. On P1 the raw rendered depth of our model must be enlarged by 1.87 to match the stereo reference (metric AbsRel 0.462), and the DA models by about 4.2 (0.74). The pose-based scale thus does not yield metric agreement with the stereo reference; the known-pose estimate and the stereo fit differ by the same factor (0.093 vs.\ 0.165; Section~\ref{sec:scale}). On P2\_5 the stereo-scaled model is close to metric (factor 1.04, metric AbsRel 0.056), as expected from a stereo calibration, while the unscaled MoGe-2 model is 17$\times$ off.
+
+Table~\ref{tab:priors} shows that the reconstructions largely inherit the shape accuracy of their priors. On P1 the aligned AbsRel of the prior alone (0.237 DA, 0.148 MoGe-2) matches that of the trained models (0.234--0.235 and 0.148), and on P2\_5 training even increases it (0.036 to 0.046 for MoGe-2, 0.059 to 0.064 for DA). Most of the geometric gain therefore comes from choosing a better prior and keeping it as the initial surface, not from the optimisation improving on it. MoGe-2 also varies more in scale from frame to frame than DA (CV 12.8 vs.\ 3.4\,\% on P1), which a single global factor does not correct.

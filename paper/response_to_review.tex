@@ -1,0 +1,77 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=20mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{booktabs,longtable,array,xcolor,enumitem,url,hyperref}
+\definecolor{navy}{HTML}{193B59}
+\hypersetup{colorlinks=true,linkcolor=navy,urlcolor=navy}
+\setlength{\parindent}{0pt}\setlength{\parskip}{4pt}
+\setlist{nosep,leftmargin=*}
+\newcommand{\status}[1]{\textbf{#1}}
+\begin{document}
+{\Large\bfseries Response to the review of ``Getting the Surface Right''}\par
+\vspace{2mm}
+Revised manuscript: \path{paper/full_paper_revised.pdf} (built from the source fragments by \path{paper/build_full_paper.py}). The original \path{full_paper.pdf} is unchanged. 3 October 2026.
+
+\section*{Summary}
+We checked every finding against the code, saved outputs and sources; all 40 were confirmed or reasonable, and we disagree with none. The revision makes the following substantive changes.
+\begin{itemize}
+\item \textbf{New computation without training:} corrected uncertainty benchmark with signals independent of the stereo mask (F01); disjoint regions with error shares from per-frame sums (F10, F24); metric and fixed-scale depth errors and per-frame scale statistics for all 24 trained models (F02); prior-only evaluation (F31); training-frames-only scale estimation with known-pose geometric filters and a sensitivity analysis (F06, F07); unrounded statistics and per-seed paired differences (F13, F27, F30).
+\item \textbf{New training:} our model retrained (3 seeds) with the held-out-clean, filtered scale $\times$0.104 instead of $\times$0.093: 32.29$\pm$0.06\,dB PSNR and 0.147 scale-aligned AbsRel (vs.\ 32.40 and 0.148 with $\times$0.093; per seed $-0.08$ to $-0.16$\,dB). The depth result does not depend on the test frames; the PSNR gain over the reproduced baseline becomes $+0.31$\,dB.
+\item \textbf{Reframing without new training}, as the review's minimum revision allows: confounded ablations (F04, F05), second-sequence scope (F11), metric claims (F02), protocol separation (F03).
+\item \textbf{Text, equations, figures and build:} all remaining findings.
+\end{itemize}
+\textbf{Effect on the conclusions.} The uncertainty conclusions hold after removing the mask dependence (prior disagreement 34--65\,\% of the attainable gain instead of 30--63\,\%; accumulated opacity unchanged at $-1$ to 17\,\%). Per-frame alignment hides little temporal drift (one training-view scale gives at most 0.003 higher AbsRel), but our P1 reconstructions are not metric (raw depth 1.87$\times$ too shallow relative to stereo), so all depth claims are now stated as shape agreement with an estimated reference. The trained models' depth largely inherits the prior's accuracy (new prior-only Table V), and depth edges are not the dominant source of total error (tissue carries 63\,\% on P1).
+
+\section*{Point-by-point}
+\begin{longtable}{@{}p{0.055\textwidth}p{0.15\textwidth}p{0.73\textwidth}@{}}
+\toprule
+ID & Status & Change \\
+\midrule
+\endhead
+F01 & Accepted; recomputed & Prior alignment now uses only pixels where rendered and prior depth are finite and positive; all signal maps are frozen before any stereo mask (\path{stereomis/uncertainty_bench.py}; the original kept as \path{uncertainty_bench_v1_reference_masked.py}). Table VIII (formerly VI), Figs.~7--10 and all quoted ranges regenerated from \path{output/stereomis/uncertainty_v2}. Conclusions unchanged; prior-disagreement gain 34--65\,\%. \\
+F02 & Accepted; new evaluation & Depth metrics renamed ``per-frame scale-aligned, stereo-reference-relative''. New Table VI: aligned, fixed-scale (one factor from training views) and metric AbsRel plus per-frame scale mean and CV for all setups (\path{stereomis/eval_depth_extended.py}). Fixed vs.\ aligned differ by $\le$0.003; scale CV 0.4--6.2\,\%; ours is 1.87$\times$ too shallow (metric AbsRel 0.462). ``Defined only up to scale'' removed; metric claims narrowed. \\
+F03 & Accepted & P1 (monocular + known poses) and P2\_5 (stereo-assisted scale) are separated in the problem setting, Fig.~1, Table I, Table VII (two blocks), the setup and the conclusion. The ten P2\_5 calibration frames are listed; none is a test frame. The unscaled P2\_5 row is kept as the monocular comparison. \\
+F04 & Accepted; reframed & The normal-loss block now states its stereo-fitted scale and includes its matched reference (31.56); differences reported as $-0.12$/$-0.28$\,dB. \\
+F05 & Accepted; reframed & The endpoint is named ``$\lambda_d{=}\lambda_n{=}\lambda^D_u{=}0$: all depth terms and image TV off''; the text states that removing the group improves PSNR without identifying individual terms. Leave-one-out runs not added (listed as future work). \\
+F06 & Accepted; recomputed & Quasi-static assumption stated. Added known-pose Sampson filter ($\le$2\,px), cheirality in both cameras, reprojection ($\le$2\,px) and triangulation-angle filters, and a baseline sensitivity (2/4/6\,mm: 0.085/0.104/0.105) (\path{stereomis/estimate_prior_scale.py}). \\
+F07 & Accepted; recomputed and retrained & Confirmed that 0.0928 used all frames. Training-frames-only: 0.0976; with filters: 0.1044. The paper states which factor each experiment used and reports the retrained model with 0.1044. \\
+F08 & Accepted & ``True error''/``ground truth'' replaced by stereo-reference-relative terminology; the strict-reference claim weakened to ``persists after filtering some stereo mismatches''; region coverage under the strict mask reported. \\
+F09 & Accepted & Signal renamed ``accumulated opacity (used as confidence by Endo-4DGS)''; the loss written with its global reductions; the finding scoped to this signal and loss. \\
+F10 & Accepted; recomputed & Disjoint partition; error shares from per-frame sums: tissue 63\,\%, edges 22\,\%, specular 8\,\%, ring 7\,\% on P1 (ours). ``Dominant failure mode'' removed. \\
+F11 & Accepted & ``Every/all trends'' replaced by ``the FoV and initialisation findings''; objective, normal and pose ablations stated as P1-only. \\
+F12 & Accepted & LPIPS trade-off stated in abstract, contributions, results, claims and conclusion (0.189 vs.\ 0.178). \\
+F13 & Accepted & Sample s.d.\ ($n{-}1$) stated; per-seed paired PSNR differences given; no significance claims. \\
+F14 & Accepted & Rendering equations now give $\hat w=\sum a_k$ and $\hat D=\sum a_k z_k/\hat w$, the zero-opacity rule and the expected-depth interpretation. \\
+F15 & Accepted & Moments defined as $m_r$, $r\in\{1,2\}$, with clamping and $\epsilon$. \\
+F16 & Accepted & ``At most 327\,680'', with the observed count for frame 801 (all pixels valid and unmasked) and initial/final counts distinguished. \\
+F17 & Accepted & $K_{\mathrm{render}}$ and $K_{\mathrm{tri}}$ distinguished with principal points and offsets; the untested effect stated. \\
+F18 & Accepted & Wording changed to a unit conversion consistent with the poses; MoGe-2 per-frame scale CV reported (12.8\,\% on P1). \\
+F19 & Accepted & Wording corrected; candidate explanations for 0.093 vs.\ 0.165 listed without choosing one; metric errors now reported. \\
+F20 & Accepted & Scale-invariant and scale-dependent terms listed (pseudo-normals and depth TV are not invariant); the image-TV coupling stated. \\
+F21 & Accepted & Masks defined for each metric (stereo disparity $>1$, finite positive prediction, prior validity for the uncertainty benchmark). \\
+F22 & Accepted & $G$ defined as a ratio of means (Eq.\ in Section III-K); the mean of per-frame ratios differs by at most 5.2 points and is mentioned. \\
+F23 & Accepted & Decile plot renamed a ranking diagnostic; ``calibration'' removed. \\
+F24 & Accepted; recomputed & Fixed precedence device $>$ specular $>$ edge $>$ tissue; all mask parameters and the border caveat stated. \\
+F25 & Accepted & Cost split into preprocessing, training, rendering and uncertainty; MoGe-2 4.5\,FPS serial cost and ensemble/extra-pass costs stated; unmeasured memory claim removed. \\
+F26 & Accepted & Setup states the code commit (39c6ce2), Depth-Anything ViT-B vs.\ the paper's Small, released loss weights and local modifications; the ``unreleased frame range'' footnote corrected. \\
+F27 & Accepted & SSIM shown with four decimals from unrounded means; difference $+0.001$. \\
+F28 & Accepted & Published SSIM changed to 0.850 (arXiv v4, Table 2). \\
+F29 & Accepted & Published numbers labelled as protocol-dependent context; the spread-as-threshold argument removed. \\
+F30 & Accepted & Seed s.d.\ 0.0004 quoted; table prints $<$.001. \\
+F31 & Accepted; new table & Prior-only evaluation (Table V) for both priors and sequences (\path{stereomis/eval_priors.py}): raw scale and CV, aligned AbsRel, median relative error, valid fraction. It also shows that the trained models inherit the prior's accuracy. \\
+F32 & Accepted & Comparators named for every percentage (e.g.\ 61\,\% vs.\ the reproduced baseline, 154\,\% vs.\ ours; regional changes vs.\ FoV-corrected DA); P2\_5 ties explained with unrounded values. \\
+F33 & Accepted & All listed phrases replaced. \\
+F34 & Accepted & ``Weak and inconsistent ranking'' and ``strongest tested individual signal''; relative-ranking caveat added. \\
+F35 & Accepted & Novelty bounded to ``among the works reviewed'' with the search cutoff; established ingredients acknowledged; uncertainty literature split by target; compatibility with other architectures stated as untested. \\
+F36 & Accepted & Table I uses wrapped columns at readable size and covers both protocols; Table IX (formerly VII) has one row per source with FPS and GPU. \\
+F37 & Partly & Reference numbers removed from figure graphics (qualitative and per-frame figures regenerated). Author names remain placeholders until the authors provide them. \\
+F38 & Accepted & PRIMU description corrected (colour and depth; generalisation to unseen scenes); FisherRF placed with depth-AUSE work. \\
+F39 & Accepted & Corrections applied to the source fragments; the build script checks return codes, halts on errors, rejects undefined references and unfilled placeholders; empty TikZ \path{text width} keys replaced by explicit styles. \\
+F40 & Noted & Builds cleanly; target venue and page limit are not yet specified, so compliance cannot be checked. \\
+\bottomrule
+\end{longtable}
+
+\section*{Open items that require new experiments}
+Leave-one-component-out training for the objective (F05); objective and pose ablations on P2\_5 (F11); an independent geometric reference such as phantom data (F02, F08); additional sequences (F13).
+\end{document}

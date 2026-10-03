@@ -1,0 +1,21 @@
+\begin{table*}[t]
+\caption{Which signal ranks the stereo-reference-relative depth error? Spearman $\rho$ between each per-pixel signal (computed from the model and its monocular prior only) and the per-frame scale-aligned AbsRel against SGBM stereo, and the share of the attainable ranking gain $G$ (Eq.~\ref{eq:gain}; ratio of the mean AURG to the mean random-order AUSE over 25 (P1) or 13 (P2\_5) test frames and three seeds; 100\,\% = oracle, 0\,\% = random). Strict: stereo pixels that pass a left--right consistency check. Best per column in bold.}
+\label{tab:unc}
+\centering\scriptsize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}lcccccccccccccccc@{}}
+\toprule
+ & \multicolumn{4}{c}{P1, FoV + DA} & \multicolumn{4}{c}{P1, ours} & \multicolumn{4}{c}{P2\_5, FoV + DA} & \multicolumn{4}{c}{P2\_5, ours (stereo-scaled)} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}\cmidrule(lr){10-13}\cmidrule(lr){14-17}
+ & \multicolumn{2}{c}{SGBM} & \multicolumn{2}{c}{strict} & \multicolumn{2}{c}{SGBM} & \multicolumn{2}{c}{strict} & \multicolumn{2}{c}{SGBM} & \multicolumn{2}{c}{strict} & \multicolumn{2}{c}{SGBM} & \multicolumn{2}{c}{strict} \\
+Signal & $\rho$ & gain & $\rho$ & gain & $\rho$ & gain & $\rho$ & gain & $\rho$ & gain & $\rho$ & gain & $\rho$ & gain & $\rho$ & gain \\
+\midrule
+accumulated opacity (Endo-4DGS confidence) & -0.00 & -1 & 0.01 & -1 & 0.11 & 7 & 0.04 & 0 & 0.04 & -1 & 0.04 & 4 & 0.06 & 3 & 0.12 & 17 \\
+ray depth spread & 0.20 & 20 & 0.21 & 10 & 0.15 & 5 & 0.09 & -4 & 0.07 & -13 & 0.04 & 12 & 0.14 & 16 & 0.18 & 26 \\
+deformation magnitude & -0.06 & -2 & -0.01 & 6 & 0.04 & 9 & 0.03 & 18 & 0.10 & 7 & 0.07 & -1 & 0.25 & 39 & 0.17 & 26 \\
+seed ensemble (3 seeds) & 0.24 & 31 & 0.22 & 37 & 0.15 & 8 & 0.06 & -10 & 0.29 & 29 & 0.21 & 25 & 0.20 & 31 & 0.21 & 24 \\
+prior disagreement & 0.30 & 39 & \textbf{0.55} & \textbf{65} & \textbf{0.36} & \textbf{35} & \textbf{0.28} & \textbf{43} & \textbf{0.40} & \textbf{49} & \textbf{0.33} & \textbf{34} & \textbf{0.33} & \textbf{47} & \textbf{0.40} & \textbf{48} \\
+combined (rank mean) & \textbf{0.39} & \textbf{49} & 0.52 & 63 & 0.30 & 31 & 0.21 & 27 & 0.36 & 41 & 0.28 & 33 & 0.30 & 42 & 0.35 & 43 \\
+\bottomrule
+\end{tabular}
+\end{table*}

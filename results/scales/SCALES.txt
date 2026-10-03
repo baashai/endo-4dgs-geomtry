@@ -1,0 +1,4 @@
+split_1/depth_mogeps: 0.09276044640803219
+split_1/depth_mogeps2: 0.10441246119634415
+split_1/depth_mogesc: 0.16445481777191162
+p2_5/depth_mogesc: 0.0572  # stereo-fitted (median over 10 frames); camera static, pose triangulation impossible

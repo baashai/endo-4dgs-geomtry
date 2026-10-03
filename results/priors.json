@@ -1,0 +1,42 @@
+{
+ "P1/depth_dam": {
+  "sequence": "P1",
+  "prior": "Depth-Anything ViT-B",
+  "frames": 25,
+  "raw_scale_mean": 3.449660062789917,
+  "raw_scale_cv": 0.033589769154787064,
+  "aligned_absrel": 0.2365703135728836,
+  "median_rel_error": 0.16575942933559418,
+  "valid_fraction": 0.5053226318359375
+ },
+ "P1/depth_moge": {
+  "sequence": "P1",
+  "prior": "MoGe-2 ViT-L (metric)",
+  "frames": 25,
+  "raw_scale_mean": 0.1682775318622589,
+  "raw_scale_cv": 0.12785272300243378,
+  "aligned_absrel": 0.14769841730594635,
+  "median_rel_error": 0.09858174622058868,
+  "valid_fraction": 0.5053226318359375
+ },
+ "P2_5/depth_dam": {
+  "sequence": "P2_5",
+  "prior": "Depth-Anything ViT-B",
+  "frames": 13,
+  "raw_scale_mean": 2.946331024169922,
+  "raw_scale_cv": 0.012965538538992405,
+  "aligned_absrel": 0.058988627046346664,
+  "median_rel_error": 0.0442366860806942,
+  "valid_fraction": 0.5979036771334134
+ },
+ "P2_5/depth_moge": {
+  "sequence": "P2_5",
+  "prior": "MoGe-2 ViT-L (metric)",
+  "frames": 13,
+  "raw_scale_mean": 0.056163571774959564,
+  "raw_scale_cv": 0.06392130255699158,
+  "aligned_absrel": 0.03572477772831917,
+  "median_rel_error": 0.027725091204047203,
+  "valid_fraction": 0.5979036771334134
+ }
+}

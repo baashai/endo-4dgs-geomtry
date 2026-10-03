@@ -1,0 +1,26 @@
+
+\subsection{Second sequence}
+\label{sec:p25}
+\begin{table}[t]
+\caption{Second sequence: StereoMIS P2\_5, frames 5301--5499 (every second frame; 100 frames, 13 test views; mean $\pm$ sample s.d., 3 seeds). The camera is static, so the known-pose scale is undefined; the scaled row uses a separate, stereo-assisted protocol. AbsRel: per-frame scale-aligned, against stereo.}
+\label{tab:p25}
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Setup & PSNR$\uparrow$ & SSIM$\uparrow$ & LPIPS$\downarrow$ & AbsRel$\downarrow$ & $\delta{<}1.25\uparrow$ \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Monocular inputs (left images, known poses)}} \\
+Original, reproduced & 26.70\pmsd{.10} & 0.729\pmsd{.003} & 0.184\pmsd{.003} & 0.063\pmsd{.001} & 0.967\pmsd{.002} \\
++ FoV fix (DA) & 27.89\pmsd{.03} & 0.778\pmsd{.002} & 0.168\pmsd{.002} & 0.064\pmsd{.001} & 0.965\pmsd{.002} \\
++ FoV, MoGe-2 init, unscaled & 27.95\pmsd{.02} & 0.776\pmsd{.001} & 0.201\pmsd{.001} & \best{0.046}\pmsd{.001} & \best{0.996}\pmsd{.001} \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Stereo-assisted scale calibration (training frames)}} \\
+\rowcolor{ours!12} + FoV, MoGe-2 init, scaled$^\dagger$ & \best{28.66}\pmsd{.08} & \best{0.807}\pmsd{.003} & \best{0.153}\pmsd{.007} & \best{0.046}\pmsd{.001} & \best{0.996}\pmsd{.003} \\
+\bottomrule
+\end{tabular}}\\[2pt]
+\parbox{\columnwidth}{\raggedright\scriptsize $^\dagger$Scale $\times$0.0572, the median over training frames 5301, 5321, \dots, 5481 (every 10th frame; none is a test frame) of the per-frame median ratio of stereo to MoGe-2 depth. Bold AbsRel values tie at the displayed precision (unrounded: 0.0459 unscaled, 0.0458 scaled).}
+\end{table}
+To test whether the FoV and initialisation findings transfer, we repeat the main configurations on StereoMIS P2\_5, frames 5301--5499 at every second frame, a clip also used by Endo-PairGS~\cite{yu2026endopairgs}. Its rectified focal length is 559.9\,px (FoV 59.5$^\circ$), and the released-style preprocessing again stores the unrectified 1033.9\,px. The camera is essentially static: the largest distance between any two camera centres is 0.12\,mm, so triangulation has no parallax and the scale of Section~\ref{sec:scale} cannot be estimated. We therefore report MoGe-2 initialisation unscaled, which uses only monocular inputs, and, as a separate stereo-assisted protocol, with a scale fitted to stereo on training frames ($\times$0.0572; MoGe-2 depth is 17.8$\times$ too large on the test frames, Table~\ref{tab:priors}).
+
+Table~\ref{tab:p25} reproduces the FoV and initialisation findings of P1. The FoV fix adds 1.19\,dB PSNR without changing the scale-aligned depth error (0.064 vs.\ 0.063), and MoGe-2 initialisation reduces it by 28\,\% relative to FoV-corrected DA (0.064 to 0.046) and raises $\delta{<}1.25$ to 0.996, with or without scale correction. Without scaling, PSNR and SSIM match FoV-corrected DA but LPIPS is worse (0.201); the stereo-fitted scale gives the best values on all three image metrics, 1.96\,dB PSNR above the reproduced baseline. We did not run the objective, normal-loss or pose ablations on P2\_5, so the conclusions about depth supervision and poses rest on P1 alone. Endo-PairGS reports 29.06\,dB for Endo-4DGS on this clip~\cite{yu2026endopairgs}, 2.4\,dB above our reproduction; we cannot reconcile this from the published protocol description and compare only within our protocol.

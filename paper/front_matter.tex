@@ -1,0 +1,151 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\definecolor{ours}{HTML}{2A78D6}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=black,citecolor=black,urlcolor=black}
+
+\begin{document}
+
+\title{Getting the Surface Right: Scale-Corrected Monocular Geometry Priors for Endoscopic 4D Gaussian Splatting}
+
+\author{\IEEEauthorblockN{Author Name(s)}
+\IEEEauthorblockA{Affiliation, City, Country \quad email@domain}}
+
+\maketitle
+
+\begin{abstract}
+Monocular 4D Gaussian splatting reconstructs deforming surgical scenes in real time, but is judged almost exclusively by how well it re-renders held-out frames, not by whether its depth is correct or where it fails. We revisit Endo-4DGS on two StereoMIS sequences and compare rendered depth with stereo-reference depth. The released preprocessing renders sequence P1 with a 34.2$^\circ$ instead of a 58.7$^\circ$ field of view, and MoGe-2, a recent metric point-map model, overestimates endoscopic depth 6--18$\times$. On P1, correcting the intrinsics, scaling MoGe-2 from the known camera poses and inter-frame matches, and using it only for initialisation raises PSNR from 31.98 to 32.40\,dB and reduces the per-frame scale-aligned depth error (AbsRel) by 37\,\%, from 0.234 to 0.148, over three seeds, with a higher LPIPS (0.189 vs.\ 0.178); absolute depth remains about 1.9$\times$ too shallow. On a static second sequence, MoGe-2 initialisation reduces the aligned error by 28\,\% relative to the FoV-corrected baseline. To explain where depth disagrees with the reference, we evaluate five per-pixel signals computed from the model and its prior. The accumulated opacity that Endo-4DGS uses as confidence ranks depth errors weakly ($\le$17\,\% of the attainable ranking gain), whereas disagreement with the monocular prior is the strongest tested signal (34--65\,\%), also under a strict left--right-consistent reference. Depth edges have the highest per-pixel error, but most of the total error lies on ordinary tissue. Image-only training from Depth-Anything gives the highest PSNR but a 61\,\% larger depth error than the reproduced baseline, so image-metric and depth rankings can disagree.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Gaussian splatting, endoscopy, monocular depth estimation, deformable tissue reconstruction, surgical scene reconstruction
+\end{IEEEkeywords}
+
+\section{Introduction}
+Reconstructing the deforming surgical field in 3D from endoscopic video is a building block for intraoperative navigation, augmented reality and autonomous robotic assistance. The task is difficult: tissue deforms continuously, instruments occlude it, specular highlights violate photometric assumptions, and the camera often moves very little. Neural radiance field methods first made such reconstructions feasible, from EndoNeRF~\cite{wang2022endonerf} to the surface-based EndoSurf~\cite{zha2023endosurf} and the plane-factorised LerPlane and ForPlane~\cite{yang2023lerplane,yang2023forplane}, but they need minutes to hours of training and render at only a few frames per second. 3D Gaussian splatting~\cite{kerbl2023gaussian} and its dynamic extensions~\cite{wu2024_4dgs} changed this, and a fast-growing family of endoscopic variants now trains in minutes and renders at 100\,FPS or more, including EndoGaussian~\cite{liu2024endogaussian}, EndoGS~\cite{zhu2024endogs}, Deform3DGS~\cite{yang2024deform3dgs}, SurgicalGaussian~\cite{xie2024surgicalgaussian}, SurgicalGS~\cite{chen2024surgicalgs}, Endo-4DGS~\cite{huang2024endo4dgs} and, more recently, EH-SurGS~\cite{shan2025ehsurgs}, Endo-4DGX~\cite{huang2025endo4dgx}, Endo-PairGS~\cite{yu2026endopairgs}, Endo-G$^2$T~\cite{liu2025endog2t} and EndoWave~\cite{wu2025endowave}.
+
+When only a monocular endoscope is available, these methods rely on a learned depth prior to place and constrain the Gaussians. Endo-4DGS~\cite{huang2024endo4dgs}, for example, back-projects Depth-Anything~\cite{yang2024depthanything} predictions into its initial point cloud and supervises rendered depth with them. Monocular geometry models have since advanced from relative depth to metric point maps: MoGe~\cite{wang2025moge} recovers affine-invariant geometry, and MoGe-2~\cite{wang2025moge2} adds metric scale and sharper detail, which makes it an attractive drop-in prior. Whether such priors actually improve the reconstructed surface, however, is hard to tell from the literature. Almost all methods are evaluated with PSNR, SSIM and LPIPS on held-out frames of a nearly static video, which reward plausible appearance rather than correct geometry; the few that report depth do so on different clips and against different references~\cite{chen2024surgicalgs,song2026diff2dgs}. Image metrics are also fragile across papers: on the same StereoMIS~\cite{hayoz2023stereomis} clip, Endo-4DGS is reported at 32.69\,dB by its authors~\cite{huang2024endo4dgs} and at 32.17 and 32.19\,dB by others~\cite{yu2026endopairgs,liu2025endog2t}.
+
+In this work we reproduce Endo-4DGS on StereoMIS and evaluate it on both axes, comparing rendered depth with stereo-reference depth from the same endoscope and repeating each configuration with three seeds. This exposes an error in the released preprocessing, which renders StereoMIS P1 with a 34.2$^\circ$ instead of a 58.7$^\circ$ field of view, and shows that the metric scale of MoGe-2 does not transfer to endoscopic images. We correct the intrinsics, estimate the prior's scale from the known camera poses and inter-frame feature matches rather than from stereo, and find that with a well-scaled MoGe-2 initialisation, removing the depth-related loss terms raises PSNR without increasing the scale-aligned depth error. We then ask which per-pixel signals of a trained model indicate where its depth is wrong.
+
+Our contributions are:
+\begin{itemize}
+\item a multi-seed evaluation of monocular endoscopic 4D Gaussian splatting against stereo-reference depth, including metric and fixed-scale depth errors, which shows that image-metric rankings need not match depth-accuracy rankings on these clips;
+\item a correction of the StereoMIS camera intrinsics used by Endo-4DGS, worth $+0.35$\,dB PSNR on P1 and $+1.19$\,dB on P2\_5 with unchanged scale-aligned depth error;
+\item a stereo-free scale estimate for metric monocular priors from known camera poses and inter-frame matches, with geometric filters and a sensitivity analysis, applicable when the camera moves;
+\item an initialisation-only use of the scaled MoGe-2 prior that improves PSNR by $+0.42$\,dB and reduces the scale-aligned depth error by 37\,\% over the reproduced baseline on P1, with worse LPIPS (0.189 vs.\ 0.178); the FoV and initialisation findings are reproduced on a second sequence, whereas the objective and pose ablations are on P1 only;
+\item to our knowledge, the first evaluation of per-pixel geometric uncertainty signals for deformable Gaussian splatting in endoscopy against stereo-reference depth, with a strict left--right-consistent reference, which finds that the accumulated opacity used as confidence by Endo-4DGS ranks depth errors weakly and that disagreement with the monocular prior is the strongest tested individual signal, and attributes the remaining error to image regions.
+\end{itemize}
+Our changes target the depth prior and the training objective. We expect them to be complementary to the architectural advances of recent methods~\cite{yu2026endopairgs,liu2025endog2t,wu2025endowave}, which report higher PSNR on the same clip but no geometric accuracy; this compatibility is a hypothesis we have not tested.
+
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Neural fields for deformable tissue}
+EndoNeRF~\cite{wang2022endonerf} first applied neural radiance fields to deformable surgical scenes, using stereo depth and tool masks with a canonical field and a deformation field. EndoSurf~\cite{zha2023endosurf} replaced density with a signed distance function to recover explicit surfaces from stereo video, and is one of the few methods that reports geometric error (RMSE and point-cloud distance on the EndoNeRF data). LerPlane~\cite{yang2023lerplane} and ForPlane~\cite{yang2023forplane} factorise space--time into planes, cutting training from hours to about ten minutes, but rendering stays below 2\,FPS~\cite{huang2024endo4dgs,yang2024deform3dgs}.
+
+\subsection{Gaussian splatting for surgical scenes}
+3D Gaussian splatting~\cite{kerbl2023gaussian} and its deformable extension 4DGS~\cite{wu2024_4dgs} brought real-time rendering, and endoscopic variants followed quickly. EndoGaussian~\cite{liu2024endogaussian} and EndoGS~\cite{zhu2024endogs} adapted deformable Gaussians to endoscopic video; Deform3DGS~\cite{yang2024deform3dgs} uses a flexible deformation model for fast training; SurgicalGaussian~\cite{xie2024surgicalgaussian} and SurgicalGS~\cite{chen2024surgicalgs} target high-fidelity reconstruction with depth from stereo networks; HFGS~\cite{zhao2024hfgs} emphasises spatial and temporal high frequencies; ST-Endo4DGS~\cite{li2024stendo4dgs} models spatio-temporal structure; and EH-SurGS~\cite{shan2025ehsurgs} targets efficient, high-fidelity reconstruction. Endo-4DGS~\cite{huang2024endo4dgs}, the basis of this work, is a monocular 4DGS method that draws its geometry prior from Depth-Anything; Endo-4DGX~\cite{huang2025endo4dgx}, from the same group, adds illumination correction. The most recent methods improve the representation or its priors further: Endo-PairGS~\cite{yu2026endopairgs} uses pairwise geometry priors from a feed-forward model, Endo-G$^2$T~\cite{liu2025endog2t} adds geometry guidance and temporal awareness, EndoWave~\cite{wu2025endowave} builds on rational-wavelet 4D Gaussians, Endo-TSR~\cite{wu2026endotsr} models temporal spectra of appearance and motion, and ColorGS~\cite{ji2025colorgs} enriches the colour model. Surface-oriented variants use 2D Gaussians or surfels for better geometric consistency (Diff2DGS~\cite{song2026diff2dgs}, Endo2DGS~\cite{zhou2026endo2dgs}, Surgical Gaussian Surfels~\cite{sunmola2026sgs}). Other works relax the input assumptions: Free-SurGS~\cite{guo2024freesurgs} and Free-DyGS~\cite{li2024freedygs} remove the need for SfM or camera poses, Endo-GSMT~\cite{gou2025endogsmt} couples reconstruction with motion tracking, EndoSparse~\cite{li2024endosparse} handles sparse views, and Local-EndoGS~\cite{shan2026localendogs} handles arbitrary camera motion with local deformable models.
+
+\subsection{Depth priors and their scale}
+Monocular methods depend on a learned depth prior. Depth-Anything~\cite{yang2024depthanything} gives relative depth; MoGe~\cite{wang2025moge} predicts affine-invariant point maps; MoGe-2~\cite{wang2025moge2} adds metric scale and sharper detail. Because relative or foreign-domain depth carries no reliable scale, methods resolve it in different ways. Stereo-based methods sidestep the problem with depth from stereo networks~\cite{xie2024surgicalgaussian,chen2024surgicalgs,wu2026endotsr}. Endo-4DGS~\cite{huang2024endo4dgs} uses a scale-invariant depth loss but initialises from the prior's raw scale. Local-EndoGS~\cite{shan2026localendogs} fits a per-frame scale and offset by least squares to the depth rendered from its own Gaussians, given known poses, and Khan \emph{et al.}~\cite{khan2025unifying} optimise pseudo-metric depth with L-BFGS-B for volumetric (TSDF) reconstruction. We are not aware of prior work that uses MoGe or MoGe-2 for endoscopic Gaussian splatting, or that measures how well its metric scale transfers to endoscopic images.
+
+\subsection{Evaluation practice}
+Nearly all methods above are ranked by PSNR, SSIM and LPIPS on held-out frames of the training video. Geometric accuracy is reported by few: EndoSurf (RMSE, point-cloud distance)~\cite{zha2023endosurf}, SurgicalGS (AbsRel and related errors against RAFT stereo depth)~\cite{chen2024surgicalgs}, Diff2DGS (RMSE)~\cite{song2026diff2dgs}, Endo2DGS (depth error on EndoNeRF)~\cite{zhou2026endo2dgs} and Local-EndoGS (median-scaled AbsRel and $\delta$ on two long StereoMIS sequences)~\cite{shan2026localendogs}. Protocols also differ widely: StereoMIS is evaluated on P1 frames 800--1000~\cite{huang2024endo4dgs,liu2025endog2t,wu2025endowave,yu2026endopairgs}, on clips of P2\_7 and P3~\cite{yang2024deform3dgs,ji2025colorgs,song2026diff2dgs}, on other P1 clips~\cite{shan2025ehsurgs,huang2025endo4dgx}, on unnamed fast-motion clips~\cite{xie2024surgicalgaussian}, and with pose-estimation or flow-aligned metrics~\cite{gou2025endogsmt,li2024freedygs}. Even on one clip, the same method differs by about 0.5\,dB between papers~\cite{huang2024endo4dgs,yu2026endopairgs,liu2025endog2t}, and among the works we examined only Endo-TSR~\cite{wu2026endotsr}, EH-SurGS~\cite{shan2025ehsurgs} and this work report repeated runs.
+
+\begin{table*}[t]
+\caption{Design comparison with prior work (literature reviewed up to 2 October 2026). ``--'': not used or not reported in the tables we examined. Geometry: depth or surface accuracy reported by the paper itself. DA: Depth-Anything.}
+\label{tab:design}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}>{\raggedright}p{2.55cm}>{\raggedright}p{2.6cm}>{\raggedright}p{2.35cm}>{\raggedright}p{3.75cm}>{\raggedright}p{2.6cm}>{\raggedright\arraybackslash}p{3.1cm}@{}}
+\toprule
+Method & Representation & Depth input & Scale / pose handling & Geometry reported & StereoMIS protocol \\
+\midrule
+EndoNeRF~\cite{wang2022endonerf} & NeRF + deformation field & stereo & -- & -- & (run by others on P1 800--1000) \\
+EndoSurf~\cite{zha2023endosurf} & SDF neural field & stereo & -- & RMSE, PCD (EndoNeRF data) & -- \\
+LerPlane / ForPlane~\cite{yang2023lerplane,yang2023forplane} & space--time planes & -- & -- & -- & (run by others) \\
+EndoGaussian~\cite{liu2024endogaussian} & deformable GS & mono or binocular & -- & -- & (run by others) \\
+EndoGS~\cite{zhu2024endogs} & deformable GS & -- & -- & -- & (run by others) \\
+Deform3DGS~\cite{yang2024deform3dgs} & deformable GS (flexible deformation) & -- & -- & -- & 3 clips of P2\_7, P3 \\
+SurgicalGaussian~\cite{xie2024surgicalgaussian} & deformable GS & stereo (STTR-light) & -- & -- & 2 fast-motion clips \\
+SurgicalGS~\cite{chen2024surgicalgs} & deformable GS & stereo (RAFT) & -- & AbsRel, RMSE vs.\ RAFT depth & not stated \\
+HFGS~\cite{zhao2024hfgs} & 4DGS & -- & -- & -- & -- \\
+Endo-4DGS~\cite{huang2024endo4dgs} & 4DGS & mono (DA) & scale-invariant depth loss & -- & P1 800--1000 \\
+ST-Endo4DGS~\cite{li2024stendo4dgs} & 4DGS & -- & -- & -- & (run by others on P1 800--1000) \\
+Free-SurGS / Free-DyGS~\cite{guo2024freesurgs,li2024freedygs} & GS & -- & SfM-free / pose-free & -- & -- / 5 sequences \\
+EndoSparse~\cite{li2024endosparse} & GS & -- & sparse views & -- & -- \\
+EH-SurGS~\cite{shan2025ehsurgs} & deformable GS & -- & -- & -- & P1\_1, P1\_2 (3 runs) \\
+Endo-4DGX~\cite{huang2025endo4dgx} & dynamic GS + illumination correction & -- & -- & -- & two P1 clips \\
+Endo-GSMT~\cite{gou2025endogsmt} & dynamic GS & mono & SLAM poses, motion tracking & -- & 5 segments, flow-aligned \\
+Endo-G$^2$T~\cite{liu2025endog2t} & 4DGS & mono & geometry guidance & -- & P1 800--1000 \\
+EndoWave~\cite{wu2025endowave} & rational-wavelet 4DGS & -- & -- & -- & P1 800--1000 \\
+ColorGS~\cite{ji2025colorgs} & deformable GS & -- & -- & -- & P2\_7, P3 \\
+Surgical Gaussian Surfels~\cite{sunmola2026sgs} & Gaussian surfels & mono (Omnidata) & -- & -- & P2\_7, P2\_8 \\
+Diff2DGS~\cite{song2026diff2dgs} & 2D Gaussians & -- & -- & RMSE & P2\_7, P3 \\
+Endo2DGS~\cite{zhou2026endo2dgs} & 2D Gaussians, depth-guided normals & -- & -- & depth error (EndoNeRF data) & -- \\
+Endo-PairGS~\cite{yu2026endopairgs} & deformable GS & pairwise feed-forward priors & -- & -- & P1, P2-2, P2-5, P3 \\
+Endo-TSR~\cite{wu2026endotsr} & dynamic GS & stereo (FoundationStereo) & -- & -- & Endo-PairGS clips (3 seeds) \\
+Local-EndoGS~\cite{shan2026localendogs} & local deformable GS & mono (DA) & known poses; per-frame $\alpha,\beta$ fit to rendered depth & AbsRel, $\delta$ (median-scaled) & 2 sequences, 1000 / 1500 frames \\
+Khan \emph{et al.}~\cite{khan2025unifying} & TSDF fusion & mono (Depth Pro + DA) & pseudo-metric depth (L-BFGS-B) & -- & -- (SCARED, HEVD) \\
+\rowcolor{ours!12} \textbf{Ours} & 4DGS & mono (MoGe-2, metric) & P1: known poses, global scale from known-pose triangulation; P2\_5: scale fitted to stereo (static camera); corrected intrinsics; prior for init only & scale-aligned, metric and fixed-scale AbsRel, $\delta$ vs.\ stereo SGBM & P1 801--1000, P2\_5 5301--5499 (3 seeds) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Positioning and novelty of this work}
+Table~\ref{tab:design} and Table~\ref{tab:sameclip} place our work against the literature. Controlled comparisons are only those within this study; published numbers from other papers are context. We support each claim with evidence and state where the evidence ends.
+
+\begin{table}[t]
+\caption{Published results on StereoMIS P1 frames $\sim$800--1000, one row per source, as printed (protocol-dependent context, not a controlled comparison); ours: mean of 3 seeds. FPS and GPU belong to the same source. AbsRel (per-frame scale-aligned, vs.\ stereo) is reported only by this work.}
+\label{tab:sameclip}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{1.9pt}
+\begin{tabular}{@{}llcccl@{}}
+\toprule
+Method & Source & PSNR$\uparrow$ & AbsRel$\downarrow$ & FPS & GPU \\
+\midrule
+Endo-4DGS & own~\cite{huang2024endo4dgs} & 32.69 & -- & 100 & RTX 4090 \\
+Endo-4DGS & \cite{yu2026endopairgs} & 32.17 & -- & -- & A100 \\
+Endo-4DGS & \cite{liu2025endog2t} & 32.19 & -- & 100 & RTX 4090 \\
+ST-Endo4DGS & \cite{liu2025endog2t} & 32.90 & -- & 123 & RTX 4090 \\
+EndoGaussian & \cite{yu2026endopairgs} & 32.79 & -- & -- & A100 \\
+SurgicalGS & \cite{yu2026endopairgs} & 32.98 & -- & -- & A100 \\
+SurgicalGS & \cite{wu2025endowave} & 31.60 & -- & 183 & RTX 4090 \\
+EndoWave & own~\cite{wu2025endowave} & 33.26 & -- & 77 & RTX 4090 \\
+Deform3DGS & \cite{yu2026endopairgs} & 33.35 & -- & -- & A100 \\
+Endo-PairGS & own~\cite{yu2026endopairgs} & 33.56 & -- & 100 & A100 \\
+Endo-G$^2$T & own~\cite{liu2025endog2t} & 33.58 & -- & 148$^\ast$ & RTX 4090 \\
+Endo-TSR$^\dagger$ & own~\cite{wu2026endotsr} & 38.45 & -- & -- & -- \\
+\midrule
+Endo-4DGS, reproduced & this work & 31.98 & 0.234 & 38 & RTX 4060 Ti \\
+\rowcolor{ours!12} \textbf{Ours} ($\times$0.093) & this work & 32.40 & \textbf{0.148} & 38 & RTX 4060 Ti \\
+Ours, held-out-clean scale ($\times$0.104) & this work & 32.29 & 0.147 & -- & RTX 4060 Ti \\
+\bottomrule
+\end{tabular}\\[2pt]
+\raggedright\scriptsize $^\dagger$Uses stereo depth. $^\ast$Rasterisation only, as stated by the source. Our FPS: 640$\times$512.
+\end{table}
+
+\textbf{Claim 1: higher PSNR and lower scale-aligned depth error than the method we build on.} Under an identical protocol (same clip, split, metrics, hardware and three seeds), our model improves on reproduced Endo-4DGS on P1 by $+0.42$\,dB PSNR (per seed $+0.44$, $+0.45$, $+0.37$) and reduces the per-frame scale-aligned AbsRel by 37\,\%, with lower error on all 25 test frames, while SSIM changes by only $+0.001$ and LPIPS worsens from 0.178 to 0.189. With the held-out-clean scale factor the result is 32.29\,dB PSNR and 0.147 AbsRel over three seeds ($+0.31$\,dB and $-37$\,\% relative to the reproduced baseline; SSIM $-0.001$, LPIPS 0.194), so the depth gain does not depend on the test frames, while the PSNR gain is 0.11\,dB smaller. Its PSNR exceeds the Endo-4DGS values reported by two independent re-implementations on this clip (32.17 and 32.19\,dB~\cite{yu2026endopairgs,liu2025endog2t}), but not the 32.69\,dB printed by its authors~\cite{huang2024endo4dgs}; these are cross-protocol numbers.
+
+\textbf{Claim 2: a depth evaluation on this clip.} Among the works we reviewed, none of the methods evaluated on P1 frames 800--1000~\cite{huang2024endo4dgs,yu2026endopairgs,liu2025endog2t,wu2025endowave,wu2026endotsr} reports depth or surface accuracy (Table~\ref{tab:sameclip}). Our scale-aligned AbsRel of 0.148 measures shape agreement with an estimated stereo reference, not verified surface accuracy, and our P1 reconstructions are not metric (Section~\ref{sec:metric}). Local-EndoGS reports a lower AbsRel (0.112 and 0.129) with a similar metric~\cite{shan2026localendogs}, but on different and longer sequences with its own reference depth, so the two are not comparable.
+
+\textbf{Claim 3: components and findings.} Known-pose triangulation and median scale fitting are established ingredients; our contribution is their controlled use and evaluation in this endoscopic setting. Among the works we reviewed, we found none that (i)~uses MoGe-2 as the geometry prior for endoscopic Gaussian splatting and measures that its metric scale is 6--18$\times$ off on endoscopic images; (ii)~scales a metric prior by known-pose triangulation, which, unlike per-frame fitting to rendered depth~\cite{shan2026localendogs} or pseudo-metric optimisation~\cite{khan2025unifying}, needs neither stereo nor a first reconstruction (it converts units consistently with the poses but does not remove the prior's frame-to-frame scale variation); (iii)~reports the field-of-view error in the released StereoMIS preprocessing of Endo-4DGS, whose StereoMIS protocol several later works adopt~\cite{liu2025endog2t,wu2025endowave,huang2025endo4dgx} (whether their preprocessing inherits the error is not stated); or (iv)~shows that, with such an initialisation, removing the depth-related losses as a group improves PSNR at equal scale-aligned depth error, and that a model with the highest PSNR can have substantially worse depth agreement.
+
+\textbf{Claim 4: explaining geometric error.} Among the works we reviewed, none evaluates per-pixel geometric uncertainty of deformable Gaussian splatting in endoscopy against an independent depth reference (Section~\ref{sec:related_unc}). Endo-NeRF++~\cite{habib2026endonerfpp} evaluates colour uncertainty of a dynamic NeRF against image error, and depth-AUSE benchmarks exist for static, non-medical scenes~\cite{goli2023bayesrays,jiang2023fisherrf,ewen2025moments,safadoust2025warprf}. Our benchmark (Section~\ref{sec:explain}) shows on two sequences and two stereo references that the accumulated opacity used as confidence by Endo-4DGS ranks depth errors weakly ($-1$ to 17\,\% of the attainable gain) and that prior disagreement is the strongest tested individual signal (34--65\,\%), with no additional training once the prior is available. Per-ray depth variance~\cite{ewen2025moments} and ensembles~\cite{klasson2024sources} are established signals; we claim only their evaluation in this setting.
+
+\textbf{Where we do not lead.} On this clip, recent methods with stronger representations or priors report 0.86--1.18\,dB higher PSNR (Endo-PairGS, Endo-G$^2$T, Deform3DGS as re-run by Endo-PairGS, EndoWave), and Endo-TSR, which uses stereo depth, reports 38.45\,dB. These are published numbers under protocols that may differ from ours, so they are context rather than a controlled ranking; we do not claim state-of-the-art image quality. Our contributions concern the depth prior, its scale and the training objective; whether they combine with these architectures is untested, and a controlled comparison including a geometric evaluation of those methods is the natural next step.
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
